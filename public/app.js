@@ -42,7 +42,8 @@ var T = {
     wantsRematch: "muốn chơi lại", accept: "Chấp nhận", decline: "Từ chối", waitingRematch: "Đang chờ đối thủ đồng ý…", oppDeclined: "Đối thủ từ chối chơi lại.",
     lbRank: "Hạng", lbPlayer: "Người chơi", lbWin: "Thắng", lbLose: "Thua",
     lbEmpty: "Chưa có ai trên bảng xếp hạng.", lbNote: "Chỉ trận online được tính; đấu với máy không tính.", meTag: "(bạn)",
-    histEmpty: "Chưa có trận online nào.", histWin: "Thắng", histLose: "Thua", vs: "gặp"
+    histEmpty: "Chưa có trận online nào.", histWin: "Thắng", histLose: "Thua", vs: "gặp",
+    delAcct: "Xoá tài khoản", delTitle: "Xoá tài khoản?", delMsg: "Hành động này không thể hoàn tác. Toàn bộ điểm và lịch sử trận của bạn sẽ bị xoá.", delYes: "Xoá vĩnh viễn", cancel: "Huỷ"
   },
   en: {
     subtitle: "Rock paper scissors — 1v1",
@@ -67,7 +68,8 @@ var T = {
     wantsRematch: "wants a rematch", accept: "Accept", decline: "Decline", waitingRematch: "Waiting for opponent to accept…", oppDeclined: "Opponent declined the rematch.",
     lbRank: "Rank", lbPlayer: "Player", lbWin: "Wins", lbLose: "Losses",
     lbEmpty: "No one on the leaderboard yet.", lbNote: "Only online matches count; practice vs computer does not.", meTag: "(you)",
-    histEmpty: "No online matches yet.", histWin: "Won", histLose: "Lost", vs: "vs"
+    histEmpty: "No online matches yet.", histWin: "Won", histLose: "Lost", vs: "vs",
+    delAcct: "Delete account", delTitle: "Delete account?", delMsg: "This cannot be undone. All your stats and match history will be erased.", delYes: "Delete permanently", cancel: "Cancel"
   }
 };
 
@@ -79,7 +81,7 @@ var state = {
   round: 1, scores: { me: 0, opp: 0 }, myMove: null, oppMove: null, oppName: "",
   phase: "idle", lastWin: false, forfeit: false, oppGone: false,
   rematchWaiting: false, rematchOffer: false, rematchFromName: "", rematchNote: "", netMsg: "",
-  lbRows: null, histRows: null, _hint: null
+  lbRows: null, histRows: null, _hint: null, _lbTimer: null, showDelConfirm: false
 };
 var socket = null;
 function tr() { return T[state.lang || "vn"]; }
@@ -121,6 +123,7 @@ function doLogin() {
       state.token = d.token; state.user = d.name;
       try { localStorage.setItem("vdn_token", d.token); localStorage.setItem("vdn_name", d.name); } catch (e) {}
       connectSocket();
+      state.lbRows = null; state.histRows = null;
       state.screen = "lobby"; state.tab = "lobby"; state.lobbyTarget = null; render();
     })
     .catch(function (err) {
@@ -131,6 +134,8 @@ function doLogin() {
 function logout() {
   try { localStorage.removeItem("vdn_token"); localStorage.removeItem("vdn_name"); } catch (e) {}
   if (socket) { try { socket.disconnect(); } catch (e) {} socket = null; }
+  stopLbTimer();
+  state.lbRows = null; state.histRows = null; state.showDelConfirm = false;
   state.token = null; state.user = null; state.screen = "login"; render();
 }
 
@@ -185,13 +190,24 @@ function ensureIo() {
 }
 
 // ===================== dữ liệu BXH / lịch sử =====================
-function loadLeaderboard() {
-  state.lbRows = null;
+function loadLeaderboard(showLoading) {
+  if (showLoading) state.lbRows = null;
   api("/api/leaderboard").then(function (rows) {
     state.lbRows = rows || [];
     if (state.screen === "lobby" && state.tab === "rank") render();
-  }).catch(function () { state.lbRows = []; if (state.screen === "lobby" && state.tab === "rank") render(); });
+  }).catch(function () {
+    if (state.lbRows === null) state.lbRows = [];
+    if (state.screen === "lobby" && state.tab === "rank") render();
+  });
 }
+function startLbTimer() {
+  if (state._lbTimer) return;
+  state._lbTimer = setInterval(function () {
+    if (state.screen === "lobby" && state.tab === "rank") loadLeaderboard(false);
+    else stopLbTimer();
+  }, 6000);
+}
+function stopLbTimer() { if (state._lbTimer) { clearInterval(state._lbTimer); state._lbTimer = null; } }
 function loadHistory() {
   state.histRows = null;
   api("/api/history", { auth: true }).then(function (rows) {
@@ -370,7 +386,8 @@ function viewLeaderboard() {
     var me = state.user && r.name.toLowerCase() === state.user.toLowerCase();
     var medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1);
     return '<div class="lbrow' + (me ? " me" : "") + '"><span class="c-rank">' + medal + '</span>' +
-      '<span class="c-name">' + esc(r.name) + (me ? ' <span style="color:var(--gold);font-size:13px">' + tr().meTag + '</span>' : '') + '</span>' +
+      '<span class="c-name"><span class="dot ' + (r.status === "online" ? "online" : r.status === "inmatch" ? "inmatch" : "offline") + '"></span>' +
+      esc(r.name) + (me ? ' <span style="color:var(--gold);font-size:13px">' + tr().meTag + '</span>' : '') + '</span>' +
       '<span class="c-w">' + r.wins + '</span><span class="c-l">' + r.losses + '</span></div>';
   }).join("");
   return '<div class="panel">' + head + body + '<p class="hint" style="margin-top:12px">' + tr().lbNote + '</p></div>';
@@ -495,8 +512,28 @@ function render() {
   var app = el("app");
   if (!state.lang) { app.innerHTML = viewLang(); bindLang(); return; }
   if (state.screen === "login") { app.innerHTML = shell(viewLogin()); bindShell(); bindLogin(); }
-  else if (state.screen === "lobby") { app.innerHTML = shell(viewLobby()); bindShell(); bindLobby(); }
+  else if (state.screen === "lobby") { app.innerHTML = shell(viewLobby()) + lobbyExtras(); bindShell(); bindLobby(); }
   else if (state.screen === "game") { app.innerHTML = shell(viewGame()); bindShell(); bindGame(); }
+}
+function lobbyExtras() {
+  var btn = '<button class="del-acct" id="delAcctBtn">🗑 ' + tr().delAcct + '</button>';
+  if (!state.showDelConfirm) return btn;
+  var overlay = '<div class="overlay"><div class="confirm-box">' +
+    '<div class="cf-title">' + tr().delTitle + '</div>' +
+    '<div class="cf-msg">' + tr().delMsg + '</div>' +
+    '<div class="stack"><button class="btn btn-danger" id="delYesBtn">' + tr().delYes + '</button>' +
+    '<button class="btn ghost" id="delNoBtn">' + tr().cancel + '</button></div></div></div>';
+  return btn + overlay;
+}
+function deleteAccount() {
+  api("/api/account", { method: "DELETE", auth: true }).then(function () {
+    state.showDelConfirm = false;
+    stopLbTimer();
+    try { localStorage.removeItem("vdn_token"); localStorage.removeItem("vdn_name"); } catch (e) {}
+    if (socket) { try { socket.disconnect(); } catch (e) {} socket = null; }
+    state.token = null; state.user = null; state.lbRows = null; state.histRows = null;
+    state.screen = "login"; render();
+  }).catch(function () { state.showDelConfirm = false; render(); });
 }
 function bindLang() {
   document.querySelectorAll("[data-lang]").forEach(function (b) {
@@ -523,14 +560,18 @@ function bindLogin() {
   var pw = el("loginPw"); if (pw) pw.onkeydown = function (e) { if (e.key === "Enter") doLogin(); };
 }
 function bindLobby() {
+  if (state.tab === "rank") startLbTimer(); else stopLbTimer();
   document.querySelectorAll("[data-tab]").forEach(function (b) {
     b.onclick = function () {
       state.tab = b.getAttribute("data-tab");
-      if (state.tab === "rank") loadLeaderboard();
+      if (state.tab === "rank") loadLeaderboard(true);
       else if (state.tab === "hist") loadHistory();
       render();
     };
   });
+  var da = el("delAcctBtn"); if (da) da.onclick = function () { state.showDelConfirm = true; render(); };
+  var dyes = el("delYesBtn"); if (dyes) dyes.onclick = deleteAccount;
+  var dno = el("delNoBtn"); if (dno) dno.onclick = function () { state.showDelConfirm = false; render(); };
   if (state.tab !== "lobby") return;
   if (!state.lobbyTarget) {
     document.querySelectorAll("[data-target]").forEach(function (b) {

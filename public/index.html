@@ -130,6 +130,22 @@
     .center-msg .big { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 27px; font-weight: 700; margin-bottom: 8px; }
     .center-msg .scoreline { color: var(--muted); font-size: 15px; margin-bottom: 14px; }
 
+    /* dấu trạng thái ở BXH */
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: middle; flex: none; }
+    .dot.online { background: var(--green); box-shadow: 0 0 6px rgba(74,222,128,0.7); }
+    .dot.inmatch { background: var(--red); box-shadow: 0 0 6px rgba(251,113,133,0.7); }
+    .dot.offline { background: #6b6680; }
+
+    /* nút xoá tài khoản */
+    .del-acct { position: fixed; right: 14px; bottom: 14px; z-index: 60; background: rgba(0,0,0,0.4); border: 1px solid var(--line2); color: var(--dim); font-size: 13px; padding: 8px 14px; border-radius: 999px; cursor: pointer; backdrop-filter: blur(4px); }
+    .del-acct:hover { border-color: var(--red); color: var(--red); }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 18px; }
+    .confirm-box { background: #1a1133; border: 1px solid var(--line); border-radius: 16px; padding: 24px; max-width: 360px; width: 100%; text-align: center; box-shadow: 0 22px 44px -16px rgba(0,0,0,0.85); }
+    .cf-title { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .cf-msg { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 18px; }
+    .btn.btn-danger { background: var(--red); color: #2a0a12; }
+    .btn.btn-danger:hover { background: #ff8a9b; }
+
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; }
       .btn:active, .role:active, .modecard:active { transform: none; }

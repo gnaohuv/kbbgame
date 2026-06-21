@@ -95,9 +95,9 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const r = await pool.query(
-      "SELECT name, wins, losses FROM users ORDER BY wins DESC, losses ASC, name ASC LIMIT 100"
+      "SELECT id, name, wins, losses FROM users ORDER BY wins DESC, losses ASC, name ASC LIMIT 100"
     );
-    res.json(r.rows);
+    res.json(r.rows.map(u => ({ name: u.name, wins: u.wins, losses: u.losses, status: statusOf(u.id) })));
   } catch (e) { res.status(500).json([]); }
 });
 
@@ -123,6 +123,17 @@ app.get("/api/history", async (req, res) => {
   } catch (e) { res.status(500).json([]); }
 });
 
+app.delete("/api/account", async (req, res) => {
+  const u = authOf(req);
+  if (!u) return res.status(401).json({ error: "auth" });
+  try {
+    await pool.query("DELETE FROM users WHERE id=$1", [u.id]); // matches tự xoá theo CASCADE
+    const set = userSockets.get(u.id);
+    if (set) { for (const s of set) { try { s.disconnect(true); } catch (e) {} } }
+    res.json({ ok: true });
+  } catch (e) { console.error("delete account error", e); res.status(500).json({ error: "server" }); }
+});
+
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -138,6 +149,24 @@ io.use((socket, next) => {
 const queues = { 3: [], 5: [] };  // hàng chờ tìm trận ngẫu nhiên theo chế độ
 const rooms = {};                 // code -> { host, target }
 const games = {};                 // matchId -> state
+const userSockets = new Map();    // uid -> Set<socket> (theo dõi online / đang trong trận)
+
+function addPresence(socket) {
+  const uid = socket.data.user.id;
+  if (!userSockets.has(uid)) userSockets.set(uid, new Set());
+  userSockets.get(uid).add(socket);
+}
+function removePresence(socket) {
+  const uid = socket.data.user.id;
+  const set = userSockets.get(uid);
+  if (set) { set.delete(socket); if (set.size === 0) userSockets.delete(uid); }
+}
+function statusOf(uid) {
+  const set = userSockets.get(uid);
+  if (!set || set.size === 0) return "offline";
+  for (const s of set) { if (s.data && s.data.matchId) return "inmatch"; }
+  return "online";
+}
 
 const BEATS = { vua: "dan", dan: "nole", nole: "vua" };
 function judge(a, b) { return a === b ? "draw" : (BEATS[a] === b ? "win" : "lose"); }
@@ -172,6 +201,7 @@ function startRematch(st) {
 }
 
 io.on("connection", (socket) => {
+  addPresence(socket);
   socket.on("find", (d) => {
     if (socket.data.matchId) return;
     const target = (d && d.target === 5) ? 5 : 3;
@@ -247,6 +277,7 @@ io.on("connection", (socket) => {
   socket.on("leaveMatch", () => endGame(socket));
 
   socket.on("disconnect", () => {
+    removePresence(socket);
     leaveQueues(socket);
     if (socket.data.roomCode) { delete rooms[socket.data.roomCode]; socket.data.roomCode = null; }
     endGame(socket);
