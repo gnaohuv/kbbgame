@@ -315,8 +315,8 @@ function viewLobby() {
 function viewLobbyHome() {
   if (!state.lobbyTarget) {
     return '<div class="panel"><p style="color:var(--muted);font-size:15px;margin:0 0 12px">' + tr().ranked + '</p><div class="stack">' +
-      modeCard("⚔️", tr().ranked + " · " + tr().to3, tr().bo5, 3) +
-      modeCard("🏰", tr().ranked + " · " + tr().to5, tr().bo9, 5) +
+      modeCard("⚔️", tr().ranked + " · " + tr().to3, 3) +
+      modeCard("🏰", tr().ranked + " · " + tr().to5, 5) +
     '</div></div>';
   }
   var label = state.lobbyTarget === 3 ? tr().to3 : tr().to5;
@@ -333,9 +333,9 @@ function viewLobbyHome() {
         '<button class="btn ghost" id="joinBtn" style="margin-top:8px">🔑 ' + tr().joinBtn + '</button></div>' +
     '</div></div>';
 }
-function modeCard(ico, title, desc, target) {
+function modeCard(ico, title, target) {
   return '<button class="modecard" data-target="' + target + '"><span class="ico">' + ico + '</span>' +
-    '<span><b>' + title + '</b><small>' + desc + '</small></span></button>';
+    '<span><b>' + title + '</b></span></button>';
 }
 function viewLeaderboard() {
   if (state.lbRows === null) return '<div class="panel"><p class="empty">…</p></div>';
@@ -387,8 +387,7 @@ function viewGame() {
 
   var head = '<div class="gamehead">' +
     '<div class="score me"><div class="lbl">' + tr().you + '</div><div class="val">' + state.scores.me + '</div></div>' +
-    '<div class="roundinfo">' + tr().round + ' ' + state.round +
-      '<br><span class="small">' + tr().firstTo + ' ' + state.target + '</span></div>' +
+    '<div class="roundinfo">' + tr().round + ' ' + state.round + '</div>' +
     '<div class="score opp"><div class="lbl">' + esc(oppLabel) + '</div><div class="val">' + state.scores.opp + '</div></div>' +
   '</div>';
 
