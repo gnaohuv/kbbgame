@@ -39,6 +39,7 @@ var T = {
     wonR: "Thắng ván!", lostR: "Thua ván!", drawR: "Hòa — ra cùng quân",
     youWin: "🏆 Bạn chiến thắng!", youLose: "💀 Bạn thua cuộc", score: "Tỉ số",
     again: "Chơi lại", toLobby: "Về sảnh", quit: "Thoát trận",
+    wantsRematch: "muốn chơi lại", accept: "Chấp nhận", decline: "Từ chối", waitingRematch: "Đang chờ đối thủ đồng ý…", oppDeclined: "Đối thủ từ chối chơi lại.",
     lbRank: "Hạng", lbPlayer: "Người chơi", lbWin: "Thắng", lbLose: "Thua",
     lbEmpty: "Chưa có ai trên bảng xếp hạng.", lbNote: "Chỉ trận online được tính; đấu với máy không tính.", meTag: "(bạn)",
     histEmpty: "Chưa có trận online nào.", histWin: "Thắng", histLose: "Thua", vs: "gặp"
@@ -63,6 +64,7 @@ var T = {
     wonR: "Round won!", lostR: "Round lost!", drawR: "Draw — same piece",
     youWin: "🏆 You win!", youLose: "💀 You lose", score: "Score",
     again: "Play again", toLobby: "Back to lobby", quit: "Quit match",
+    wantsRematch: "wants a rematch", accept: "Accept", decline: "Decline", waitingRematch: "Waiting for opponent to accept…", oppDeclined: "Opponent declined the rematch.",
     lbRank: "Rank", lbPlayer: "Player", lbWin: "Wins", lbLose: "Losses",
     lbEmpty: "No one on the leaderboard yet.", lbNote: "Only online matches count; practice vs computer does not.", meTag: "(you)",
     histEmpty: "No online matches yet.", histWin: "Won", histLose: "Lost", vs: "vs"
@@ -75,7 +77,8 @@ var state = {
   tab: "lobby", lobbyTarget: null,
   mode: null, role: "host", code: "", target: 3, matchId: null,
   round: 1, scores: { me: 0, opp: 0 }, myMove: null, oppMove: null, oppName: "",
-  phase: "idle", lastWin: false, forfeit: false, netMsg: "",
+  phase: "idle", lastWin: false, forfeit: false, oppGone: false,
+  rematchWaiting: false, rematchOffer: false, rematchFromName: "", rematchNote: "", netMsg: "",
   lbRows: null, histRows: null, _hint: null
 };
 var socket = null;
@@ -153,8 +156,22 @@ function connectSocket() {
   socket.on("reveal", function (d) { onReveal(d); });
   socket.on("rematchStart", function () { onRematchStart(); });
   socket.on("oppLeft", function () {
-    if (state.phase === "gameover" || state.phase === "left") return;
+    if (state.phase === "left") return;
+    if (state.phase === "gameover" || state.phase === "reveal") {
+      state.rematchOffer = false; state.rematchWaiting = false;
+      state.oppGone = true; state.rematchNote = tr().oppLeft;
+      if (state.phase === "gameover") render();
+      return;
+    }
     state.netMsg = tr().oppLeft; state.phase = "left"; render();
+  });
+  socket.on("rematchOffer", function (d) {
+    if (state.phase !== "gameover") return;
+    state.rematchOffer = true; state.rematchWaiting = false;
+    state.rematchFromName = (d && d.name) || tr().opp; render();
+  });
+  socket.on("rematchDeclined", function () {
+    state.rematchWaiting = false; state.rematchNote = tr().oppDeclined; render();
   });
   socket.on("forfeit", function (d) {
     state.scores = (d && d.scores) || { me: state.target, opp: 0 };
@@ -188,7 +205,9 @@ function loadHistory() {
 
 // ===================== bắt đầu trận =====================
 function freshScores() {
-  state.round = 1; state.scores = { me: 0, opp: 0 }; state.myMove = null; state.oppMove = null; state.forfeit = false;
+  state.round = 1; state.scores = { me: 0, opp: 0 }; state.myMove = null; state.oppMove = null;
+  state.forfeit = false; state.oppGone = false;
+  state.rematchWaiting = false; state.rematchOffer = false; state.rematchFromName = ""; state.rematchNote = "";
 }
 function startBot(target) {
   state.mode = "bot"; state.role = "host"; state.target = target; state.oppName = tr().cpu;
@@ -265,9 +284,11 @@ function onRematchStart() {
   freshScores(); state.phase = "choosing"; render();
 }
 function rematch() {
-  if (state.mode === "bot") { freshScores(); state.phase = "choosing"; render(); }
-  else if (socket) { socket.emit("rematch"); }
+  if (state.mode === "bot") { freshScores(); state.phase = "choosing"; render(); return; }
+  if (socket) { state.rematchWaiting = true; state.rematchNote = ""; socket.emit("rematchRequest"); render(); }
 }
+function acceptRematch() { if (socket) socket.emit("rematchAccept"); state.rematchOffer = false; render(); }
+function declineRematch() { if (socket) socket.emit("rematchDecline"); state.rematchOffer = false; render(); }
 function toLobby() {
   stopHint();
   if (state.mode === "online" && socket) { try { socket.emit("leaveMatch"); } catch (e) {} }
@@ -406,13 +427,26 @@ function viewGame() {
   var controls;
   if (state.phase === "gameover") {
     var won = state.mode === "online" ? state.lastWin : (state.scores.me >= state.target);
-    var buttons = state.forfeit
-      ? '<button class="btn" id="backBtn">' + tr().toLobby + '</button>'
-      : '<div class="stack"><button class="btn" id="rematchBtn">' + tr().again + '</button>' +
-        '<button class="btn ghost" id="backBtn">' + tr().toLobby + '</button></div>';
+    var note = "";
+    var buttons;
+    if (state.rematchOffer) {
+      note = '<div class="scoreline">' + esc(state.rematchFromName) + ' ' + tr().wantsRematch + '</div>';
+      buttons = '<div class="stack"><button class="btn" id="acceptBtn">' + tr().accept + '</button>' +
+        '<button class="btn ghost" id="declineBtn">' + tr().decline + '</button></div>';
+    } else if (state.rematchWaiting) {
+      note = '<div class="scoreline">' + tr().waitingRematch + '</div>';
+      buttons = '<button class="btn ghost" id="backBtn">' + tr().toLobby + '</button>';
+    } else {
+      if (state.rematchNote) note = '<div class="scoreline">' + esc(state.rematchNote) + '</div>';
+      else if (state.forfeit) note = '<div class="scoreline">' + tr().forfeitWin + '</div>';
+      var showRematch = (state.mode === "bot") || (state.mode === "online" && !state.forfeit && !state.oppGone);
+      buttons = showRematch
+        ? '<div class="stack"><button class="btn" id="rematchBtn">' + tr().again + '</button>' +
+          '<button class="btn ghost" id="backBtn">' + tr().toLobby + '</button></div>'
+        : '<button class="btn" id="backBtn">' + tr().toLobby + '</button>';
+    }
     controls = '<div class="center-msg"><div class="big">' + (won ? tr().youWin : tr().youLose) + '</div>' +
-      (state.forfeit ? '<div class="scoreline">' + tr().forfeitWin + '</div>' : '') +
-      '<div class="scoreline">' + tr().score + ' ' + state.scores.me + ' – ' + state.scores.opp + '</div>' +
+      note + '<div class="scoreline">' + tr().score + ' ' + state.scores.me + ' – ' + state.scores.opp + '</div>' +
       buttons + '</div>';
   } else if (state.phase === "left") {
     controls = '<div class="center-msg"><div class="big">⚠️</div>' +
@@ -522,6 +556,8 @@ function bindGame() {
   var q = el("quitBtn"); if (q) q.onclick = toLobby;
   var bk = el("backBtn"); if (bk) bk.onclick = toLobby;
   var rm = el("rematchBtn"); if (rm) rm.onclick = rematch;
+  var ac = el("acceptBtn"); if (ac) ac.onclick = acceptRematch;
+  var dc = el("declineBtn"); if (dc) dc.onclick = declineRematch;
 }
 
 // ===================== khởi động =====================

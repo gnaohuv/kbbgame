@@ -163,6 +163,14 @@ function startMatch(sA, sB, target) {
   sB.emit("matched", { matchId: id, target, opponent: st.a.name, role: "guest" });
 }
 
+function startRematch(st) {
+  st.round = 1; st.recorded = false;
+  st.a.score = 0; st.b.score = 0; st.a.move = null; st.b.move = null;
+  st.a.want = false; st.b.want = false;
+  st.a.socket.emit("rematchStart", {});
+  st.b.socket.emit("rematchStart", {});
+}
+
 io.on("connection", (socket) => {
   socket.on("find", (d) => {
     if (socket.data.matchId) return;
@@ -215,12 +223,25 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("rematch", () => {
+  socket.on("rematchRequest", () => {
     const st = games[socket.data.matchId]; if (!st) return;
-    st.round = 1; st.recorded = false;
-    st.a.score = 0; st.b.score = 0; st.a.move = null; st.b.move = null;
-    st.a.socket.emit("rematchStart", {});
-    st.b.socket.emit("rematchStart", {});
+    const me = (st.a.socket.id === socket.id) ? st.a : (st.b.socket.id === socket.id ? st.b : null);
+    if (!me) return;
+    const other = (me === st.a) ? st.b : st.a;
+    if (other.want) { startRematch(st); return; }   // cả hai cùng muốn -> vào luôn
+    me.want = true;
+    if (other.socket && other.socket.connected) other.socket.emit("rematchOffer", { name: me.name });
+  });
+  socket.on("rematchAccept", () => {
+    const st = games[socket.data.matchId]; if (!st) return;
+    startRematch(st);
+  });
+  socket.on("rematchDecline", () => {
+    const st = games[socket.data.matchId]; if (!st) return;
+    st.a.want = false; st.b.want = false;
+    const me = (st.a.socket.id === socket.id) ? st.a : st.b;
+    const other = (me === st.a) ? st.b : st.a;
+    if (other.socket && other.socket.connected) other.socket.emit("rematchDeclined", {});
   });
 
   socket.on("leaveMatch", () => endGame(socket));
